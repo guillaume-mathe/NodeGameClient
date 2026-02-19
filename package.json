@@ -1,0 +1,26 @@
+{
+  "name": "node-game-client",
+  "description": "Node based real time game client networking library",
+  "author": {
+    "email": "guillaume.mathe@gmail.com",
+    "name": "Guillaume MATHE"
+  },
+  "version": "0.0.1",
+  "type": "module",
+  "exports": "./src/index.js",
+  "files": [
+    "src/"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "piscina": "^5.1.4",
+    "rxjs": "^7.8.2",
+    "ws": "^8.19.0",
+    "xxhash-wasm": "^1.1.0"
+  },
+  "optionalDependencies": {
+    "capnp-ts": "^0.7.0"
+  }
+}

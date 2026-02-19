@@ -1,0 +1,7 @@
+/.idea/
+/NodeGameClient.iml
+/package-lock.json
+/node_modules/
+/examples/reference-client/node_modules/
+/docs/Server-README.md
+/docs/Server-CLAUDE.md

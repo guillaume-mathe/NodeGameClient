@@ -1,0 +1,12 @@
+{
+  "name": "reference-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test reference-client.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.19.0",
+    "node-game-server": "file:../../"
+  }
+}
