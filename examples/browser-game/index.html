@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Game Example</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: monospace;
+      color: #e0e0e0;
+    }
+    #status {
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    #status .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      background: #f44;
+    }
+    #status.connected .dot {
+      background: #4f4;
+    }
+    canvas {
+      border: 1px solid #333;
+      background: #16213e;
+    }
+  </style>
+</head>
+<body>
+  <div id="status"><span class="dot"></span>Connecting...</div>
+  <canvas id="canvas" width="800" height="600"></canvas>
+  <script type="module" src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "browser-game-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "node-game-server": "file:../../../NodeGameServer"
+  }
+}
