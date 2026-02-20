@@ -7,17 +7,36 @@
   },
   "version": "0.0.1",
   "type": "module",
-  "exports": "./src/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/node-game-client.js",
+      "default": "./dist/node-game-client.js"
+    },
+    "./src/*": "./src/*"
+  },
+  "module": "./dist/node-game-client.js",
+  "browser": "./dist/node-game-client.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
   "files": [
+    "dist/",
     "src/"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "prebuild": "rm -rf dist",
+    "build:bundle": "node build.js",
+    "build:types": "tsc",
+    "build": "node build.js && tsc",
+    "prepublishOnly": "npm run build",
     "test": "vitest run"
   },
   "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }
 }
