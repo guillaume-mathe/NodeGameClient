@@ -5,3 +5,6 @@ export { StateStore } from "./state/StateStore.js";
 export { lerpEntity } from "./state/interpolation.js";
 export { PredictionManager } from "./prediction/PredictionManager.js";
 export { ActionBuffer } from "./prediction/actionBuffer.js";
+export { WorkerBridge } from "./worker/WorkerBridge.js";
+export { createRenderWorker } from "./worker/renderWorkerEntry.js";
+export { AudioBridge } from "./worker/AudioBridge.js";
