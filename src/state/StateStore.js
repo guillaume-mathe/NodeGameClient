@@ -24,6 +24,11 @@ export class StateStore {
     this._count = 0;
     this._lastFrame = -1;
 
+    /** @private Game-time of the most recent state received */
+    this._lastGameTimeMs = 0;
+    /** @private performance.now() when that state arrived */
+    this._lastReceivePerf = 0;
+
     this._unsubscribe = connection.onStateChange((state) => this._push(state));
   }
 
@@ -42,6 +47,8 @@ export class StateStore {
     this._head = (this._head + 1) % this._capacity;
     if (this._count < this._capacity) this._count++;
     this._lastFrame = state.frame;
+    this._lastGameTimeMs = state.timeMs;
+    this._lastReceivePerf = performance.now();
   }
 
   /**
@@ -60,9 +67,9 @@ export class StateStore {
 
   // ---- Public getters ----
 
-  /** Estimated current server time in ms. */
+  /** Estimated current game time in ms (same time base as state.timeMs). */
   get serverTimeMsEstimate() {
-    return performance.now() + this._connection.clockOffset;
+    return this._lastGameTimeMs + (performance.now() - this._lastReceivePerf);
   }
 
   /** The time to render at (server time minus interpolation delay). */
