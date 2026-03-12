@@ -1,4 +1,5 @@
 import { createServer, JSONEnvelopeCodec } from "node-game-server";
+import { World, defineComponent } from "node-game-ecs";
 import { createServer as createHttpServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
@@ -9,6 +10,30 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
+// ---- ECS components ----
+
+const Position = defineComponent("Position", { x: 0, y: 0 });
+const Player = defineComponent("Player", { id: "", hue: 0 });
+
+const world = new World();
+
+// ---- Helpers ----
+
+function findPlayer(playerId) {
+  for (const entity of world.query(Player)) {
+    if (world.get(entity, Player).id === playerId) return entity;
+  }
+  return undefined;
+}
+
+function toState(state, ctx) {
+  const players = world.query(Player).map((entity) => ({
+    ...world.get(entity, Player),
+    ...world.get(entity, Position),
+  }));
+  return { frame: ctx.frame, timeMs: state.timeMs + ctx.dtMs, players };
+}
+
 // ---- Game logic ----
 
 const logic = {
@@ -16,37 +41,34 @@ const logic = {
     return { frame: 0, timeMs: 0, players: [] };
   },
   tick(state, actions, ctx) {
-    let players = state.players;
     for (const a of actions) {
       if (a.type === "MOVE") {
-        players = players.map((p) => {
-          if (p.id !== a.playerId) return p;
-          const x = Math.max(0, Math.min(CANVAS_W, p.x + (a.dx ?? 0)));
-          const y = Math.max(0, Math.min(CANVAS_H, p.y + (a.dy ?? 0)));
-          return { ...p, x, y };
-        });
+        const entity = findPlayer(a.playerId);
+        if (entity === undefined) continue;
+        const pos = world.get(entity, Position);
+        pos.x = Math.max(0, Math.min(CANVAS_W, pos.x + (a.dx ?? 0)));
+        pos.y = Math.max(0, Math.min(CANVAS_H, pos.y + (a.dy ?? 0)));
       }
     }
-    return { frame: ctx.frame, timeMs: state.timeMs + ctx.dtMs, players };
+    return toState(state, ctx);
   },
   onGameEvent(state, event) {
     if (event.type === "CONNECT") {
-      const hue = Math.floor(Math.random() * 360);
-      return {
-        ...state,
-        players: [
-          ...state.players,
-          { id: event.playerId, x: CANVAS_W / 2, y: CANVAS_H / 2, hue },
-        ],
-      };
+      const entity = world.create();
+      world.add(entity, Player, {
+        id: event.playerId,
+        hue: Math.floor(Math.random() * 360),
+      });
+      world.add(entity, Position, { x: CANVAS_W / 2, y: CANVAS_H / 2 });
     }
     if (event.type === "DISCONNECT") {
-      return {
-        ...state,
-        players: state.players.filter((p) => p.id !== event.playerId),
-      };
+      const entity = findPlayer(event.playerId);
+      if (entity !== undefined) {
+        world.destroy(entity);
+        world._flushDestroy();
+      }
     }
-    return state;
+    return toState(state, { frame: state.frame, dtMs: 0 });
   },
 };
 

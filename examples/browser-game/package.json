@@ -6,6 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "node-game-ecs": "file:../../../NodeGameECS",
     "node-game-server": "file:../../../NodeGameServer"
   }
 }
