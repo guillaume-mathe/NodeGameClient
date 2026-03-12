@@ -29,11 +29,12 @@ npm install
 ### Wire Protocol (docs/wire-protocol.md)
 
 WebSocket-based protocol with:
-- **Sync handshake:** `sync_request` → `sync_response` → `sync_result` (establishes playerId, calculates RTT/clock offset)
+- **Sync handshake:** `sync_request` → `sync_response` (with `token`) → `sync_result` (with `resumed` flag) — establishes playerId, calculates RTT/clock offset
 - **State delivery:** `snapshot` (full state) and `delta` (incremental updates keyed by `baseFrame`)
-- **Client messages:** `action` (with monotonic `clientSeq`) and `ack` (frame acknowledgment)
-- **Game events:** CONNECT, DISCONNECT, and custom events
-- **Close codes:** 4001 (sync timeout), 4002 (backpressure)
+- **Client messages:** `action` (with monotonic `clientSeq`), `ack` (frame acknowledgment), `logout` (intentional disconnect)
+- **Game events:** CONNECT, DISCONNECT, SUSPEND, RESUME, and custom events
+- **Session resume:** reconnect with same token to resume a suspended session (same playerId)
+- **Close codes:** 4001 (sync timeout), 4002 (backpressure), 4003 (missing token), 4004 (auth failed), 4005 (duplicate connection)
 
 ### GameClient (examples/reference-client/GameClient.js)
 
@@ -44,7 +45,9 @@ The reference client implementation. Key patterns:
 - **Guard clauses on WebSocket state** before sending messages
 - **State immutability:** new state objects created via spread operator on each update
 - **`Promise.withResolvers()`** for the async `connect()` method
-- **Auto-reconnect** with configurable delay and max attempts; `clientSeq` resets on reconnect
+- **Token-based sessions:** `token` option required for authentication and session resume
+- **Logout on disconnect:** sends `logout` message before closing for session destruction (vs suspend)
+- **Auto-reconnect** with configurable delay and max attempts; `clientSeq` resets on reconnect; same token preserves playerId
 
 ### Protocol Reserved Keys
 

@@ -91,7 +91,7 @@ function setVisibility(state) {
 // ---------------------------------------------------------------------------
 
 async function createConnectedConnection(mock) {
-  const conn = new Connection("ws://mock");
+  const conn = new Connection("ws://mock", { token: "test-token" });
   await conn.connect();
   return conn;
 }

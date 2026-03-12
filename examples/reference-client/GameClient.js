@@ -52,6 +52,7 @@ export class GameClient {
   /**
    * @param {string} url  WebSocket URL (e.g. "ws://localhost:8080")
    * @param {object} [opts]
+   * @param {string}  opts.token  Session token (required). Persisted across reconnects.
    * @param {boolean} [opts.autoReconnect=false]
    * @param {number}  [opts.reconnectDelayMs=1000]
    * @param {number}  [opts.maxReconnectAttempts=5]
@@ -60,6 +61,7 @@ export class GameClient {
    */
   constructor(url, opts = {}) {
     this.url = url;
+    this.token = opts.token;
     this.autoReconnect = opts.autoReconnect ?? false;
     this.reconnectDelayMs = opts.reconnectDelayMs ?? 1000;
     this.maxReconnectAttempts = opts.maxReconnectAttempts ?? 5;
@@ -70,6 +72,8 @@ export class GameClient {
     this.state = null;
     /** @type {string|null} */
     this.playerId = null;
+    /** @type {boolean} */
+    this.resumed = false;
     this.rtt = 0;
     this.clockOffset = 0;
     this.serverFrame = 0;
@@ -141,13 +145,14 @@ export class GameClient {
       }
 
       if (msg.kind === "sync_request") {
-        ws.send(JSON.stringify({ kind: "sync_response", t: msg.t, ct: Date.now() }));
+        ws.send(JSON.stringify({ kind: "sync_response", t: msg.t, ct: Date.now(), token: this.token }));
         return;
       }
 
       if (msg.kind === "sync_result") {
         this.rtt = msg.rtt;
         this.playerId = msg.playerId;
+        this.resumed = msg.resumed ?? false;
         this.serverFrame = msg.serverFrame;
         this.tickRateHz = msg.tickRateHz;
         this.clockOffset = msg.serverTimeMs - (Date.now() - this.rtt / 2);
@@ -156,6 +161,7 @@ export class GameClient {
         this._fire(this._onConnect, {
           rtt: this.rtt,
           playerId: this.playerId,
+          resumed: this.resumed,
           serverFrame: this.serverFrame,
           tickRateHz: this.tickRateHz,
         });
@@ -225,7 +231,7 @@ export class GameClient {
   }
 
   /**
-   * Intentional disconnect — no reconnection.
+   * Intentional disconnect — sends logout to destroy the session, no reconnection.
    */
   disconnect() {
     this._intentionalClose = true;
@@ -234,6 +240,9 @@ export class GameClient {
       this._reconnectTimer = null;
     }
     if (this._ws) {
+      if (this._ws.readyState === WebSocket.OPEN) {
+        this._ws.send(JSON.stringify({ kind: "logout" }));
+      }
       this._ws.close();
       this._ws = null;
     }

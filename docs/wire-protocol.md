@@ -23,18 +23,18 @@ All examples use JSON. Infrastructure messages (sync handshake, ack) are **alway
     │   1. sync_request  { t }           │
     │◄───────────────────────────────────│
     │                                    │
-    │   2. sync_response { t, ct }       │
+    │   2. sync_response { t, ct, token }│
     │───────────────────────────────────►│
     │                                    │
     │   3. sync_result { rtt, playerId,  │
     │      serverFrame, serverTimeMs,    │
-    │      tickRateHz }                  │
+    │      tickRateHz, resumed }         │
     │◄───────────────────────────────────│
     │                                    │
     │   4. snapshot (initial state)      │
     │◄───────────────────────────────────│
     │                                    │
-    │   5. game_event CONNECT            │
+    │   5. game_event CONNECT or RESUME  │
     │◄───────────────────────────────────│  (broadcast to all clients)
     │                                    │
     │        ── normal play ──           │
@@ -43,15 +43,25 @@ All examples use JSON. Infrastructure messages (sync handshake, ack) are **alway
     │   actions, acks                    │
     │───────────────────────────────────►│
     │                                    │
-    │   6. game_event DISCONNECT         │
+    │   ── intentional disconnect ──     │
+    │   6. logout                        │
+    │───────────────────────────────────►│
+    │   7. game_event DISCONNECT         │
     │◄───────────────────────────────────│  (broadcast to all clients)
     │         connection closed           │
+    │                                    │
+    │   ── network drop (no logout) ──   │
+    │   6. game_event SUSPEND            │
+    │◄───────────────────────────────────│  (broadcast to other clients)
+    │         session stays alive         │
+    │         (reap after timeout)        │
     └────────────────────────────────────┘
 ```
 
 **Key rules:**
 - No game data (snapshots, deltas, game events) is sent until the sync handshake completes.
-- The server assigns the `playerId` — clients cannot choose their own.
+- The `token` field in `sync_response` is **required** — connections without it are closed with code **4003**.
+- Player identity is derived from the token: either via an `authenticateToken` callback (returns `playerId`) or by using the token itself as `playerId` (simple mode).
 - If the client doesn't complete the handshake within `syncTimeoutMs` (default: 5 000 ms), the server closes the connection with code **4001**.
 
 ## Clock Synchronization Handshake
@@ -72,14 +82,15 @@ Three infrastructure messages exchanged before any game data flows.
 ### 2. `sync_response` (Client -> Server)
 
 ```json
-{ "kind": "sync_response", "t": 1700000000000, "ct": 1700000000005 }
+{ "kind": "sync_response", "t": 1700000000000, "ct": 1700000000005, "token": "abc123" }
 ```
 
-| Field | Type   | Description              |
-|-------|--------|--------------------------|
-| `kind`| string | Always `"sync_response"` |
-| `t`   | number | Echoed server timestamp (must match exactly) |
-| `ct`  | number | Client timestamp at time of reply (ms since epoch) |
+| Field   | Type   | Description              |
+|---------|--------|--------------------------|
+| `kind`  | string | Always `"sync_response"` |
+| `t`     | number | Echoed server timestamp (must match exactly) |
+| `ct`    | number | Client timestamp at time of reply (ms since epoch) |
+| `token` | string | **Required.** Session token from an external auth system. Used to identify and resume sessions. If `authenticateToken` is not configured, the token is used directly as the `playerId`. |
 
 ### 3. `sync_result` (Server -> Client)
 
@@ -90,18 +101,20 @@ Three infrastructure messages exchanged before any game data flows.
   "playerId": "a1b2c3d4-...",
   "serverFrame": 450,
   "serverTimeMs": 1700000000012,
-  "tickRateHz": 30
+  "tickRateHz": 30,
+  "resumed": false
 }
 ```
 
-| Field         | Type   | Description |
-|---------------|--------|-------------|
-| `kind`        | string | Always `"sync_result"` |
-| `rtt`         | number | Round-trip time in ms (`Date.now() - t`) |
-| `playerId`    | string | Server-assigned unique player identity (UUID) |
-| `serverFrame` | number | Current server frame at time of sync |
-| `serverTimeMs`| number | Server timestamp at time of sync |
-| `tickRateHz`  | number | Server tick rate (e.g. `30`) |
+| Field         | Type    | Description |
+|---------------|---------|-------------|
+| `kind`        | string  | Always `"sync_result"` |
+| `rtt`         | number  | Round-trip time in ms (`Date.now() - t`) |
+| `playerId`    | string  | Player identity — derived from token (see `sync_response`) |
+| `serverFrame` | number  | Current server frame at time of sync |
+| `serverTimeMs`| number  | Server timestamp at time of sync |
+| `tickRateHz`  | number  | Server tick rate (e.g. `30`) |
+| `resumed`     | boolean | `true` if this connection resumed an existing suspended session, `false` if a new session was created |
 
 The client can compute its clock offset as: `serverTimeMs - (clientNow - rtt / 2)`.
 
@@ -220,30 +233,30 @@ Top-level state fields should **not** use any of the following names, as they co
 Discrete events for connection lifecycle and game-level signals. Broadcast to **all** connected clients (never skipped by backpressure).
 
 ```json
-{
-  "kind": "game_event",
-  "type": "CONNECT",
-  "playerId": "a1b2c3d4"
-}
-```
-
-```json
-{
-  "kind": "game_event",
-  "type": "DISCONNECT",
-  "playerId": "a1b2c3d4"
-}
+{ "kind": "game_event", "type": "CONNECT",    "playerId": "a1b2c3d4" }
+{ "kind": "game_event", "type": "DISCONNECT", "playerId": "a1b2c3d4" }
+{ "kind": "game_event", "type": "SUSPEND",    "playerId": "a1b2c3d4" }
+{ "kind": "game_event", "type": "RESUME",     "playerId": "a1b2c3d4" }
 ```
 
 | Field      | Type   | Description |
 |------------|--------|-------------|
 | `kind`     | string | Always `"game_event"` |
-| `type`     | string | Event type (`CONNECT`, `DISCONNECT`, or custom) |
+| `type`     | string | Event type (see below, or custom) |
 | `playerId` | string | Player associated with the event |
 
-The default game event types are `CONNECT` and `DISCONNECT`. Game logic can extend this set via `gameEventTypes()` (e.g. adding `JOIN`, `GAME_START`).
+#### Built-in event types
 
-**Client behavior:** Handle as application-level notifications. These do not replace or modify the game state directly — state changes caused by game events arrive via the next snapshot or delta.
+| Type         | When |
+|--------------|------|
+| `CONNECT`    | New session created (first connection with this token) |
+| `DISCONNECT` | Session destroyed — explicit logout or reap timeout after suspension |
+| `SUSPEND`    | Connection dropped without logout; session stays alive for `sessionTimeoutMs` |
+| `RESUME`     | Client reconnected to a previously suspended session (same `playerId`) |
+
+Game logic can extend the event set via `gameEventTypes()` (e.g. adding `JOIN`, `GAME_START`).
+
+**Client behavior:** Handle as application-level notifications. These do not replace or modify the game state directly — state changes caused by game events arrive via the next snapshot or delta. `SUSPEND` can be used to show "Player X disconnected" UI; `RESUME` to clear it.
 
 ## Client -> Server Messages
 
@@ -281,7 +294,7 @@ With optional frame targeting:
 
 **Important:**
 - The `playerId` field, if present, is **ignored** — the server stamps the authoritative `playerId` from the connection.
-- Clients **should not** send actions with a `type` matching a game event type (`CONNECT`, `DISCONNECT`, etc.) — those are server-managed. The server does not reject them, but routes them into the game-event pipeline instead of the normal action pipeline, which will produce unintended behavior.
+- Clients **should not** send actions with a `type` matching a game event type (`CONNECT`, `DISCONNECT`, `SUSPEND`, `RESUME`, etc.) — those are server-managed. The server does not reject them, but routes them into the game-event pipeline instead of the normal action pipeline, which will produce unintended behavior.
 - `targetFrame` enables frame-addressed input for rollback netcode. If the target frame is in the past but within the rollback window, the server will rollback and replay. If omitted, the action applies to the current frame.
 - The server throttles actions per player per tick (`maxActionsPerPlayerPerTick`, default: 3) and globally (`maxActionsPerTick`, default: 2048).
 
@@ -306,52 +319,92 @@ Infrastructure message (raw JSON, not codec-encoded). Reports the last frame the
 - Send an ack after processing each snapshot or delta.
 - The reference client does this automatically when `autoAck: true` (default).
 
+### `logout` — Intentional Disconnect
+
+Infrastructure message (raw JSON, not codec-encoded). Tells the server to destroy the session immediately instead of suspending it. Send this before closing the WebSocket for a clean logout.
+
+```json
+{ "kind": "logout" }
+```
+
+| Field  | Type   | Description |
+|--------|--------|-------------|
+| `kind` | string | Always `"logout"` |
+
+**Server behavior:**
+- Marks the connection as intentional close.
+- When the WebSocket subsequently closes, the session is destroyed immediately (`DISCONNECT` event fires) with no reap timer.
+- If the client closes without sending `logout`, the session is suspended instead (`SUSPEND` event fires) and remains alive for `sessionTimeoutMs` (default: 30 000 ms) to allow reconnection.
+
 ## WebSocket Close Codes
 
 | Code | Meaning | Description |
 |------|---------|-------------|
 | 4001 | Sync timeout | Client did not complete the sync handshake within `syncTimeoutMs` |
 | 4002 | Backpressure | Client's send buffer exceeded limits for too long (`maxDroppedFrames` consecutive skipped frames) |
+| 4003 | Missing token | `sync_response` did not include a `token` field |
+| 4004 | Auth failed | The `authenticateToken` callback rejected the token (returned `null`) |
+| 4005 | Already connected | Another connection with the same token is active — the **old** connection receives this code when the new one steals it |
 
 ## Message Flow Summary
 
 ```
-Direction    Message          When                          Codec?
-─────────    ───────          ────                          ──────
-S → C        sync_request     On connection                 No (raw JSON)
-C → S        sync_response    Reply to sync_request         No (raw JSON)
-S → C        sync_result      After valid sync_response     No (raw JSON)
-S → C        snapshot         After sync + every N frames   Yes
-S → C        delta            Non-snapshot frames           Yes
-S → C        game_event       On CONNECT/DISCONNECT/custom  Yes
-C → S        action           Gameplay input                Yes
-C → S        ack              After processing state        No (raw JSON)
+Direction    Message          When                                   Codec?
+─────────    ───────          ────                                   ──────
+S → C        sync_request     On connection                          No (raw JSON)
+C → S        sync_response    Reply to sync_request (includes token) No (raw JSON)
+S → C        sync_result      After valid sync_response              No (raw JSON)
+S → C        snapshot         After sync + every N frames            Yes
+S → C        delta            Non-snapshot frames                    Yes
+S → C        game_event       On CONNECT/DISCONNECT/SUSPEND/RESUME   Yes
+C → S        action           Gameplay input                         Yes
+C → S        ack              After processing state                 No (raw JSON)
+C → S        logout           Before intentional close               No (raw JSON)
 ```
 
-## Reconnection
+## Session Resume & Reconnection
 
-There is no session resumption. Each new WebSocket connection starts a fresh sync handshake, and the server assigns a **new `playerId`** every time. The previous player identity is not preserved — from the server's perspective, a reconnecting client is indistinguishable from a brand-new client.
+Sessions persist across WebSocket connections. When a client's connection drops without a `logout` message, the server **suspends** the session instead of destroying it. The player entity remains in the game state, and other clients receive a `SUSPEND` game event.
 
-Clients that implement auto-reconnect should:
+### Reconnecting
 
-1. Reset all local state (`playerId`, game state, `clientSeq`) before opening the new connection.
-2. Expect a `DISCONNECT` game event for the old `playerId` (broadcast to other clients) followed by a `CONNECT` for the new one.
-3. Re-derive any client-side state (e.g. which player "is me") from the new `playerId` in `sync_result`.
+To reconnect, the client opens a new WebSocket and performs the sync handshake with the **same token**:
 
-The reference client resets `clientSeq` to 0, clears `state` and `playerId`, and re-runs the full handshake on each reconnection attempt. See [`examples/reference-client/GameClient.js`](../examples/reference-client/GameClient.js).
+1. Open a new WebSocket connection.
+2. Receive `sync_request`, reply with `sync_response` using the same `token` as before.
+3. Receive `sync_result` with `resumed: true` and the **same `playerId`**.
+4. Receive a fresh snapshot of the current state.
+5. A `RESUME` game event is broadcast to all clients (not `CONNECT`).
+
+The client should reset `clientSeq` to 0 and start sending acks from the fresh snapshot. The server resets all per-client ack/backpressure state on reconnect.
+
+### Session timeout
+
+If the client does not reconnect within `sessionTimeoutMs` (default: 30 000 ms), the session is reaped: a `DISCONNECT` game event fires and the player is removed from the game state. A subsequent connection with the same token creates a new session (`resumed: false`, `CONNECT` event).
+
+### Intentional disconnect
+
+To permanently end a session, the client should send `{ "kind": "logout" }` before closing the WebSocket. This triggers immediate session destruction (`DISCONNECT` event) with no reap timer.
+
+### Duplicate connections
+
+If a client connects with a token that already has an active (non-suspended) session, the **old** connection is closed with code **4005** and the new connection takes over the session. This handles browser tab refreshes gracefully.
 
 ## Implementing a Client
 
 A minimal client implementation needs to:
 
-1. **Open a WebSocket** to the server URL.
-2. **Handle the sync handshake**: receive `sync_request`, reply with `sync_response` (echo `t`, add `ct`), receive `sync_result`.
-3. **Receive the initial snapshot** and store it as the current state.
-4. **Apply subsequent messages**:
+1. **Obtain a token** from your auth system (or generate a stable identifier for simple mode).
+2. **Open a WebSocket** to the server URL.
+3. **Handle the sync handshake**: receive `sync_request`, reply with `sync_response` (echo `t`, add `ct`, include `token`), receive `sync_result`.
+4. **Check `resumed`** in `sync_result`: if `true`, the session was resumed (skip any "new player" initialization). Store `playerId` and `token` for reconnection.
+5. **Receive the initial snapshot** and store it as the current state.
+6. **Apply subsequent messages**:
    - `snapshot` -> replace state entirely (can arrive at any time, not just periodic intervals)
    - `delta` -> verify `baseFrame === localState.frame`, then apply player changes (`added`/`removed`/`updated`), merge changed non-protocol fields, delete keys listed in `_removedKeys`, update `frame`/`timeMs`. If `baseFrame` doesn't match, skip the delta and wait for the next snapshot.
-   - `game_event` -> handle as notifications (always delivered, even during backpressure)
-5. **Send acks** after processing each state update (frame number from the snapshot or the reconciled delta).
-6. **Send actions** as JSON with a `type` field and monotonically increasing `clientSeq`.
+   - `game_event` -> handle as notifications (always delivered, even during backpressure). Handle `SUSPEND`/`RESUME` for player presence UI.
+7. **Send acks** after processing each state update (frame number from the snapshot or the reconciled delta).
+8. **Send actions** as JSON with a `type` field and monotonically increasing `clientSeq`.
+9. **On intentional disconnect**, send `{ "kind": "logout" }` before closing the WebSocket. On network errors, simply reconnect with the same token.
 
 See [`examples/reference-client/GameClient.js`](../examples/reference-client/GameClient.js) for a complete working implementation.

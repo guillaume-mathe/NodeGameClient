@@ -12,6 +12,7 @@ export const SNAPSHOT = "snapshot";
 export const DELTA = "delta";
 export const GAME_EVENT = "game_event";
 export const ACK = "ack";
+export const LOGOUT = "logout";
 
 /**
  * Default delta applier — handles the standard diffState format:

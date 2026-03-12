@@ -26,6 +26,7 @@ export class MockWebSocket {
    * @param {number} [opts.serverFrame=1]
    * @param {object} [opts.initialState] - custom initial snapshot state
    * @param {boolean} [opts.autoSync=true] - automatically run sync handshake
+   * @param {boolean} [opts.resumed=false] - whether to report a resumed session
    */
   constructor(url, opts = {}) {
     this.url = url;
@@ -45,6 +46,7 @@ export class MockWebSocket {
     this._serverFrame = opts.serverFrame ?? 1;
     this._initialState = opts.initialState ?? null;
     this._autoSync = opts.autoSync ?? true;
+    this._resumed = opts.resumed ?? false;
     this._closed = false;
 
     // Schedule open + sync handshake on next microtask
@@ -131,6 +133,7 @@ export class MockWebSocket {
       serverFrame: this._serverFrame,
       serverTimeMs: Date.now(),
       tickRateHz: this._tickRateHz,
+      resumed: this._resumed,
     });
 
     // 4. Send initial snapshot

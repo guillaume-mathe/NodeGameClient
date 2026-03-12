@@ -15,7 +15,10 @@ const PLAYER_SIZE = 30;
 
 // ---- Setup ----
 
-const connection = new Connection("ws://localhost:8080", { autoAck: true });
+const connection = new Connection("ws://localhost:8080", {
+  token: crypto.randomUUID(),
+  autoAck: true,
+});
 
 const inputManager = new InputManager({
   target: canvas,

@@ -7,6 +7,8 @@ import { GameClient } from "./GameClient.js";
 // Shared test logic and helpers
 // ---------------------------------------------------------------------------
 let testPortCounter = 0;
+let testTokenCounter = 0;
+function nextToken() { return `test-token-${++testTokenCounter}`; }
 
 const defaultLogic = {
   createInitialState() {
@@ -68,7 +70,7 @@ describe("GameClient", () => {
     it("completes sync and receives initial snapshot", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         await client.connect();
 
         assert.ok(client.state, "state should be set after connect");
@@ -84,7 +86,7 @@ describe("GameClient", () => {
     it("connect() resolves with state available", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         await client.connect();
 
         assert.ok(client.state !== null);
@@ -99,7 +101,7 @@ describe("GameClient", () => {
     it("disconnect() closes cleanly", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         await client.connect();
         client.disconnect();
 
@@ -112,7 +114,7 @@ describe("GameClient", () => {
     it("connected property reflects state", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         assert.equal(client.connected, false);
 
         await client.connect();
@@ -132,7 +134,7 @@ describe("GameClient", () => {
     it("applies snapshot", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         await client.connect();
 
         // Initial snapshot has a players array (with the connected client itself)
@@ -148,7 +150,7 @@ describe("GameClient", () => {
     it("applies delta (add/remove/update players)", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         const states = [];
         client.onStateChange(s => states.push(JSON.parse(JSON.stringify(s))));
 
@@ -178,7 +180,7 @@ describe("GameClient", () => {
     it("skips delta with mismatched baseFrame", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         const warnings = [];
         const origWarn = console.warn;
         console.warn = (...args) => warnings.push(args.join(" "));
@@ -211,7 +213,7 @@ describe("GameClient", () => {
     it("sendAction auto-increments clientSeq", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         await client.connect();
 
         // Capture what the server receives
@@ -240,7 +242,7 @@ describe("GameClient", () => {
     it("server receives and applies the action", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         await client.connect();
         const playerId = client.playerId;
 
@@ -268,7 +270,7 @@ describe("GameClient", () => {
     it("autoAck sends ack after state update", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url, { autoAck: true });
+        const client = new GameClient(url, { token: nextToken(), autoAck: true });
         await client.connect();
 
         // Wait for a tick to send state and the client to ack
@@ -289,7 +291,7 @@ describe("GameClient", () => {
     it("autoAck=false suppresses ack", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url, { autoAck: false });
+        const client = new GameClient(url, { token: nextToken(), autoAck: false });
         await client.connect();
 
         // Wait for a tick
@@ -310,7 +312,7 @@ describe("GameClient", () => {
     it("manual sendAck works", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url, { autoAck: false });
+        const client = new GameClient(url, { token: nextToken(), autoAck: false });
         await client.connect();
 
         client.sendAck(5);
@@ -335,7 +337,7 @@ describe("GameClient", () => {
     it("onStateChange fires on snapshot and delta", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         const states = [];
         client.onStateChange(s => states.push(s));
 
@@ -359,14 +361,14 @@ describe("GameClient", () => {
     it("onGameEvent fires for CONNECT/DISCONNECT", async () => {
       const { server, url } = startTestServer();
       try {
-        const client1 = new GameClient(url);
+        const client1 = new GameClient(url, { token: nextToken() });
         const events = [];
         client1.onGameEvent(e => events.push(e));
 
         await client1.connect();
 
         // Connect a second client — should trigger a CONNECT game event
-        const client2 = new GameClient(url);
+        const client2 = new GameClient(url, { token: nextToken() });
         await client2.connect();
 
         await waitFor(() => events.some(e => e.type === "CONNECT"));
@@ -388,7 +390,7 @@ describe("GameClient", () => {
     it("onConnect fires with sync info", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         let connectInfo = null;
         client.onConnect(info => { connectInfo = info; });
 
@@ -409,7 +411,7 @@ describe("GameClient", () => {
     it("onDisconnect fires with code/reason", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         let disconnectInfo = null;
         client.onDisconnect(info => { disconnectInfo = info; });
 
@@ -430,7 +432,7 @@ describe("GameClient", () => {
     it("unsub prevents further callbacks", async () => {
       const { server, url } = startTestServer();
       try {
-        const client = new GameClient(url);
+        const client = new GameClient(url, { token: nextToken() });
         const states = [];
         const unsub = client.onStateChange(s => states.push(s));
 
@@ -460,6 +462,7 @@ describe("GameClient", () => {
       const { server, url } = startTestServer();
       try {
         const client = new GameClient(url, {
+          token: nextToken(),
           autoReconnect: true,
           reconnectDelayMs: 100,
           maxReconnectAttempts: 3,
@@ -490,6 +493,7 @@ describe("GameClient", () => {
       const { server, url } = startTestServer();
       try {
         const client = new GameClient(url, {
+          token: nextToken(),
           autoReconnect: true,
           reconnectDelayMs: 100,
         });
@@ -509,6 +513,7 @@ describe("GameClient", () => {
     it("respects maxReconnectAttempts", async () => {
       const { server, url } = startTestServer();
       const client = new GameClient(url, {
+        token: nextToken(),
         autoReconnect: true,
         reconnectDelayMs: 50,
         maxReconnectAttempts: 2,
@@ -543,6 +548,7 @@ describe("GameClient", () => {
       try {
         let customCalled = false;
         const client = new GameClient(url, {
+          token: nextToken(),
           applyDelta(state, msg) {
             customCalled = true;
             // Simple: just update frame

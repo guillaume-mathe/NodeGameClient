@@ -1,9 +1,10 @@
 import { GameClient } from "./GameClient.js";
+import { randomUUID } from "node:crypto";
 
-const client = new GameClient("ws://localhost:8080");
+const client = new GameClient("ws://localhost:8080", { token: randomUUID() });
 
-client.onConnect(({ rtt, playerId, serverFrame, tickRateHz }) => {
-  console.log(`Connected as ${playerId} (rtt=${rtt}ms, frame=${serverFrame}, ${tickRateHz}Hz)`);
+client.onConnect(({ rtt, playerId, resumed, serverFrame, tickRateHz }) => {
+  console.log(`Connected as ${playerId} (rtt=${rtt}ms, frame=${serverFrame}, ${tickRateHz}Hz, resumed=${resumed})`);
 });
 
 client.onStateChange((state) => {

@@ -38,7 +38,7 @@ describe("Connection", () => {
 
   describe("connection lifecycle", () => {
     it("completes sync and receives initial snapshot", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       await client.connect();
 
       expect(client.state).toBeTruthy();
@@ -49,7 +49,7 @@ describe("Connection", () => {
     });
 
     it("connect() resolves with state available", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       await client.connect();
 
       expect(client.state).not.toBeNull();
@@ -59,7 +59,7 @@ describe("Connection", () => {
     });
 
     it("disconnect() closes cleanly", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       await client.connect();
       client.disconnect();
 
@@ -67,7 +67,7 @@ describe("Connection", () => {
     });
 
     it("connected property reflects state", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       expect(client.connected).toBe(false);
 
       await client.connect();
@@ -76,13 +76,63 @@ describe("Connection", () => {
       client.disconnect();
       expect(client.connected).toBe(false);
     });
+
+    it("sends token in sync_response", async () => {
+      const client = new Connection("ws://mock", { token: "my-secret-token" });
+      await client.connect();
+
+      const ws = mock.lastInstance();
+      const syncResponse = ws.sent
+        .map(s => { try { return JSON.parse(s); } catch { return null; } })
+        .find(m => m && m.kind === "sync_response");
+
+      expect(syncResponse).toBeTruthy();
+      expect(syncResponse.token).toBe("my-secret-token");
+
+      client.disconnect();
+    });
+
+    it("sends logout before closing on disconnect()", async () => {
+      const client = new Connection("ws://mock", { token: "t1" });
+      await client.connect();
+
+      const ws = mock.lastInstance();
+      client.disconnect();
+
+      const logout = ws.sent
+        .map(s => { try { return JSON.parse(s); } catch { return null; } })
+        .find(m => m && m.kind === "logout");
+
+      expect(logout).toBeTruthy();
+    });
+
+    it("exposes resumed=false for new sessions", async () => {
+      const client = new Connection("ws://mock", { token: "t1" });
+      await client.connect();
+
+      expect(client.resumed).toBe(false);
+
+      client.disconnect();
+    });
+
+    it("exposes resumed=true for resumed sessions", async () => {
+      mock.cleanup();
+      mock = installMockWebSocket({ resumed: true });
+
+      const client = new Connection("ws://mock", { token: "t1" });
+      await client.connect();
+
+      expect(client.resumed).toBe(true);
+
+      client.disconnect();
+    });
   });
 
   // ------ state reconciliation ------
 
   describe("state reconciliation", () => {
     it("applies snapshot", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       await client.connect();
 
       expect(Array.isArray(client.state.players)).toBe(true);
@@ -92,7 +142,7 @@ describe("Connection", () => {
     });
 
     it("applies delta (add/remove/update players)", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       await client.connect();
 
       const ws = mock.lastInstance();
@@ -136,7 +186,7 @@ describe("Connection", () => {
     });
 
     it("skips delta with mismatched baseFrame", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       await client.connect();
@@ -170,7 +220,7 @@ describe("Connection", () => {
 
   describe("actions", () => {
     it("sendAction auto-increments clientSeq", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       await client.connect();
 
       client.sendAction({ type: "MOVE", x: 1, y: 1 });
@@ -189,7 +239,7 @@ describe("Connection", () => {
     });
 
     it("action message includes type and payload", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       await client.connect();
 
       client.sendAction({ type: "FIRE", x: 10, y: 20 });
@@ -213,7 +263,7 @@ describe("Connection", () => {
 
   describe("ack", () => {
     it("autoAck sends ack after snapshot", async () => {
-      const client = new Connection("ws://mock", { autoAck: true });
+      const client = new Connection("ws://mock", { token: "t1", autoAck: true });
       await client.connect();
 
       const ws = mock.lastInstance();
@@ -228,7 +278,7 @@ describe("Connection", () => {
     });
 
     it("autoAck=false suppresses ack", async () => {
-      const client = new Connection("ws://mock", { autoAck: false });
+      const client = new Connection("ws://mock", { token: "t1", autoAck: false });
       await client.connect();
 
       const ws = mock.lastInstance();
@@ -242,7 +292,7 @@ describe("Connection", () => {
     });
 
     it("manual sendAck works", async () => {
-      const client = new Connection("ws://mock", { autoAck: false });
+      const client = new Connection("ws://mock", { token: "t1", autoAck: false });
       await client.connect();
 
       client.sendAck(5);
@@ -263,7 +313,7 @@ describe("Connection", () => {
 
   describe("callbacks", () => {
     it("onStateChange fires on snapshot and delta", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       const states = [];
       client.onStateChange(s => states.push(s));
 
@@ -291,7 +341,7 @@ describe("Connection", () => {
     });
 
     it("onGameEvent fires for game events", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       const events = [];
       client.onGameEvent(e => events.push(e));
 
@@ -311,8 +361,8 @@ describe("Connection", () => {
       client.disconnect();
     });
 
-    it("onConnect fires with sync info", async () => {
-      const client = new Connection("ws://mock");
+    it("onConnect fires with sync info including resumed", async () => {
+      const client = new Connection("ws://mock", { token: "t1" });
       let connectInfo = null;
       client.onConnect(info => { connectInfo = info; });
 
@@ -323,12 +373,13 @@ describe("Connection", () => {
       expect(typeof connectInfo.playerId).toBe("string");
       expect(typeof connectInfo.serverFrame).toBe("number");
       expect(connectInfo.tickRateHz).toBe(30);
+      expect(connectInfo.resumed).toBe(false);
 
       client.disconnect();
     });
 
     it("onDisconnect fires with code and willReconnect", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       let disconnectInfo = null;
       client.onDisconnect(info => { disconnectInfo = info; });
 
@@ -342,7 +393,7 @@ describe("Connection", () => {
     });
 
     it("unsubscribe prevents further callbacks", async () => {
-      const client = new Connection("ws://mock");
+      const client = new Connection("ws://mock", { token: "t1" });
       const states = [];
       const unsub = client.onStateChange(s => states.push(s));
 
@@ -375,6 +426,7 @@ describe("Connection", () => {
   describe("reconnection", () => {
     it("auto-reconnects after unexpected close", async () => {
       const client = new Connection("ws://mock", {
+        token: "t1",
         autoReconnect: true,
         reconnectDelayMs: 50,
         maxReconnectAttempts: 3,
@@ -399,6 +451,7 @@ describe("Connection", () => {
 
     it("no reconnect after intentional disconnect()", async () => {
       const client = new Connection("ws://mock", {
+        token: "t1",
         autoReconnect: true,
         reconnectDelayMs: 50,
       });
@@ -491,6 +544,7 @@ describe("Connection", () => {
       };
 
       const client = new Connection("ws://mock", {
+        token: "t1",
         autoReconnect: true,
         reconnectDelayMs: 30,
         maxReconnectAttempts: 2,
@@ -525,6 +579,7 @@ describe("Connection", () => {
     it("uses custom applyDelta callback", async () => {
       let customCalled = false;
       const client = new Connection("ws://mock", {
+        token: "t1",
         applyDelta(state, msg) {
           customCalled = true;
           return { ...state, frame: msg.frame, timeMs: msg.timeMs };
