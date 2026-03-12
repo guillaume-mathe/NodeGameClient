@@ -1,10 +1,10 @@
 import {
   Connection,
   GameLoop,
-  InputManager,
   StateStore,
   lerpEntity,
 } from "/dist/node-game-client.js";
+import { IntentManager } from "/dist/node-game-input-manager.js";
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -20,12 +20,9 @@ const connection = new Connection("ws://localhost:8080", {
   autoAck: true,
 });
 
-const inputManager = new InputManager({
-  target: canvas,
+const inputManager = new IntentManager({
   keyboard: true,
-  pointer: false,
   gamepad: false,
-  touch: false,
 });
 
 let stateStore = null;
@@ -34,14 +31,9 @@ let loop = null;
 // ---- Update (fixed timestep) ----
 
 function update(sendAction) {
-  const input = inputManager.poll();
-  let dx = 0;
-  let dy = 0;
-
-  if (input.keys.has("KeyW") || input.keys.has("ArrowUp")) dy -= SPEED;
-  if (input.keys.has("KeyS") || input.keys.has("ArrowDown")) dy += SPEED;
-  if (input.keys.has("KeyA") || input.keys.has("ArrowLeft")) dx -= SPEED;
-  if (input.keys.has("KeyD") || input.keys.has("ArrowRight")) dx += SPEED;
+  const intent = inputManager.poll();
+  const dx = intent.MOVE_X.value * SPEED;
+  const dy = intent.MOVE_Y.value * SPEED;
 
   if (dx !== 0 || dy !== 0) {
     sendAction({ type: "MOVE", dx, dy });

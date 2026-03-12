@@ -80,15 +80,24 @@ const httpServer = createHttpServer(async (req, res) => {
     return serve(res, routes[url.pathname]);
   }
 
-  // Serve dist files
-  if (url.pathname.startsWith("/dist/")) {
+  // Serve NodeGameClient dist files
+  if (url.pathname.startsWith("/dist/node-game-client")) {
     const file = url.pathname.slice("/dist/".length);
-    // Prevent path traversal
     if (file.includes("..")) {
       res.writeHead(403);
       return res.end("Forbidden");
     }
     return serve(res, join(__dirname, "..", "..", "dist", file));
+  }
+
+  // Serve NodeGameInputManager dist files
+  if (url.pathname.startsWith("/dist/node-game-input-manager")) {
+    const file = url.pathname.slice("/dist/".length);
+    if (file.includes("..")) {
+      res.writeHead(403);
+      return res.end("Forbidden");
+    }
+    return serve(res, join(__dirname, "..", "..", "..", "NodeGameInputManager", "dist", file));
   }
 
   res.writeHead(404);
