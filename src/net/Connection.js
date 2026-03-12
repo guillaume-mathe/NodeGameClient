@@ -73,6 +73,7 @@ export class Connection {
       this.connected = false;
 
       const ws = new WebSocket(this.url);
+      ws.binaryType = "arraybuffer";
       this._ws = ws;
 
       let settled = false;
@@ -107,7 +108,10 @@ export class Connection {
       ws.onmessage = (event) => {
         let msg;
         try {
-          msg = JSON.parse(event.data);
+          const raw = event.data instanceof ArrayBuffer
+            ? new TextDecoder().decode(event.data)
+            : event.data;
+          msg = JSON.parse(raw);
         } catch {
           return; // ignore non-JSON
         }
