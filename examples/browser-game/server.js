@@ -21,15 +21,15 @@ const world = new World();
 
 function findPlayer(playerId) {
   for (const entity of world.query(Player)) {
-    if (world.get(entity, Player).id === playerId) return entity;
+    if (world.getField(entity, Player, "id") === playerId) return entity;
   }
   return undefined;
 }
 
 function toState(state, ctx) {
   const players = world.query(Player).map((entity) => ({
-    ...world.get(entity, Player),
-    ...world.get(entity, Position),
+    ...world.getAll(entity, Player),
+    ...world.getAll(entity, Position),
   }));
   return { frame: ctx.frame, timeMs: state.timeMs + ctx.dtMs, players };
 }
@@ -45,9 +45,10 @@ const logic = {
       if (a.type === "MOVE") {
         const entity = findPlayer(a.playerId);
         if (entity === undefined) continue;
-        const pos = world.get(entity, Position);
-        pos.x = Math.max(0, Math.min(CANVAS_W, pos.x + (a.dx ?? 0)));
-        pos.y = Math.max(0, Math.min(CANVAS_H, pos.y + (a.dy ?? 0)));
+        const x = world.getField(entity, Position, "x");
+        const y = world.getField(entity, Position, "y");
+        world.setField(entity, Position, "x", Math.max(0, Math.min(CANVAS_W, x + (a.dx ?? 0))));
+        world.setField(entity, Position, "y", Math.max(0, Math.min(CANVAS_H, y + (a.dy ?? 0))));
       }
     }
     return toState(state, ctx);

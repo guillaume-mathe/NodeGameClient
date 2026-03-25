@@ -6,3 +6,5 @@
 /docs/Server-README.md
 /docs/Server-CLAUDE.md
 /dist/
+/examples/browser-game/package-lock.json
+/examples/reference-client/package-lock.json
