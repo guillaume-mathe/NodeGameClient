@@ -34,6 +34,18 @@
     "prepublishOnly": "npm run build",
     "test": "vitest run"
   },
+  "peerDependencies": {
+    "node-game-ecs": ">=0.0.1",
+    "node-game-input-manager": ">=0.0.1"
+  },
+  "peerDependenciesMeta": {
+    "node-game-ecs": {
+      "optional": true
+    },
+    "node-game-input-manager": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "esbuild": "^0.25.0",
     "typescript": "^5.7.0",

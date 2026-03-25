@@ -1,6 +1,5 @@
-import { KeyboardDevice } from "./KeyboardDevice.js";
+import { KeyboardDevice, GamepadDevice } from "node-game-input-manager";
 import { PointerDevice } from "./PointerDevice.js";
-import { GamepadDevice } from "./GamepadDevice.js";
 import { TouchDevice } from "./TouchDevice.js";
 
 /**

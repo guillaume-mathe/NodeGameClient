@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { KeyboardDevice } from "../src/input/KeyboardDevice.js";
+import { KeyboardDevice, GamepadDevice } from "node-game-input-manager";
 import { PointerDevice } from "../src/input/PointerDevice.js";
-import { GamepadDevice } from "../src/input/GamepadDevice.js";
 import { TouchDevice } from "../src/input/TouchDevice.js";
 import { InputManager } from "../src/input/InputManager.js";
 

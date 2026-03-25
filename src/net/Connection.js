@@ -258,7 +258,7 @@ export class Connection {
    */
   _resolveDelta(state, msg) {
     if (this._world) {
-      this._world.applyDiff(msg);
+      this._world.applyDiff({ entities: msg.entities });
       const snap = this._world.serialize();
       return { frame: msg.frame, timeMs: msg.timeMs, entities: snap.entities };
     }
