@@ -11,6 +11,20 @@ All examples use JSON. Infrastructure messages (sync handshake, ack) are **alway
 - **Framing**: Each WebSocket message is one complete protocol message
 - **Compression**: The server enables `permessage-deflate` with a 512-byte threshold — messages smaller than 512 bytes are sent uncompressed, larger ones are deflated. Clients should accept the `permessage-deflate` extension during the WebSocket handshake.
 
+### Frame types
+
+Even when using the JSON codec (`JSONEnvelopeCodec`), not all messages arrive as text frames:
+
+| Direction | Messages | WebSocket frame type | Notes |
+|-----------|----------|---------------------|-------|
+| S → C | `sync_request`, `sync_result` | **Text** (UTF-8 JSON) | Infrastructure — always raw JSON |
+| S → C | `game_event` | **Text** (UTF-8 JSON) | Sent through codec pipeline but arrives as text |
+| S → C | `snapshot`, `delta` | **Binary** (`ArrayBuffer`) | Codec-encoded — `JSONEnvelopeCodec` wraps JSON in a `Buffer` |
+| C → S | `sync_response`, `ack`, `logout` | **Text** (UTF-8 JSON) | Infrastructure — always raw JSON |
+| C → S | `action` | **Text** (UTF-8 JSON) | Client sends raw JSON; server codec decodes |
+
+Clients must handle both text and binary frames on the receive side. Set `ws.binaryType = "arraybuffer"` and decode binary frames with `TextDecoder` (for the JSON codec) before parsing.
+
 ## Connection Lifecycle
 
 ```
