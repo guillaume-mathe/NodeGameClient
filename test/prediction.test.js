@@ -320,3 +320,256 @@ describe("PredictionManager — dispose", () => {
     expect(pm.predictedState).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mock ECS World for prediction tests
+// ---------------------------------------------------------------------------
+
+function createMockWorld(initialEntities = []) {
+  const entities = initialEntities.map(e => ({
+    id: e.id,
+    components: Object.fromEntries(
+      Object.entries(e.components).map(([k, v]) => [k, { ...v }])
+    ),
+  }));
+
+  return {
+    _entities: entities,
+    _snapshotCalls: 0,
+    _applySnapshotCalls: 0,
+
+    applySnapshot(data) {
+      this._applySnapshotCalls++;
+      entities.length = 0;
+      for (const e of data.entities) {
+        entities.push({
+          id: e.id,
+          components: Object.fromEntries(
+            Object.entries(e.components).map(([k, v]) => [k, { ...v }])
+          ),
+        });
+      }
+      this._entities = entities;
+    },
+
+    applyDiff(diff) {
+      for (const entry of diff.entities) {
+        switch (entry.op) {
+          case "add":
+            entities.push({ id: entry.id, components: { ...entry.components } });
+            break;
+          case "update": {
+            const existing = entities.find(e => e.id === entry.id);
+            if (existing && entry.components) {
+              for (const [name, data] of Object.entries(entry.components)) {
+                existing.components[name] = { ...existing.components[name], ...data };
+              }
+            }
+            break;
+          }
+          case "remove":
+            const idx = entities.findIndex(e => e.id === entry.id);
+            if (idx !== -1) entities.splice(idx, 1);
+            break;
+        }
+      }
+      this._entities = entities;
+    },
+
+    serialize() {
+      this._snapshotCalls++;
+      return {
+        entities: entities.map(e => ({
+          id: e.id,
+          components: Object.fromEntries(
+            Object.entries(e.components).map(([k, v]) => [k, { ...v }])
+          ),
+        })),
+      };
+    },
+
+    snapshot() {
+      return this.serialize();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PredictionManager — ECS mode
+// ---------------------------------------------------------------------------
+
+describe("PredictionManager — ECS mode", () => {
+  it("exposes world via getter", () => {
+    const conn = createMockConnection(30);
+    const world = createMockWorld();
+    const pm = new PredictionManager({
+      connection: conn,
+      predict: () => {},
+      world,
+    });
+
+    expect(pm.world).toBe(world);
+
+    pm.dispose();
+  });
+
+  it("applies predict function to world on sendAction", () => {
+    const conn = createMockConnection(30);
+    const world = createMockWorld([
+      { id: 1, components: { Position: { x: 0, y: 0 } } },
+    ]);
+    conn.state = { frame: 10, timeMs: 333, entities: world.serialize().entities };
+
+    const pm = new PredictionManager({
+      connection: conn,
+      predict: (w, action) => {
+        const e = w._entities.find(e => e.id === 1);
+        if (e) {
+          e.components.Position.x += action.dx;
+          e.components.Position.y += action.dy;
+        }
+      },
+      world,
+    });
+
+    pm.sendAction({ type: "move", dx: 5, dy: 10 });
+
+    // World should be mutated
+    expect(world._entities[0].components.Position.x).toBe(5);
+    expect(world._entities[0].components.Position.y).toBe(10);
+
+    // predictedState should reflect the world
+    const predicted = pm.predictedState;
+    expect(predicted).not.toBeNull();
+    expect(predicted.entities[0].components.Position.x).toBe(5);
+
+    pm.dispose();
+  });
+
+  it("reconciles by restoring world to server state and re-applying pending", () => {
+    const conn = createMockConnection(30);
+    const world = createMockWorld([
+      { id: 1, components: { Position: { x: 0, y: 0 } } },
+    ]);
+    conn.state = { frame: 10, timeMs: 333, entities: world.serialize().entities };
+
+    const pm = new PredictionManager({
+      connection: conn,
+      predict: (w, action) => {
+        const e = w._entities.find(e => e.id === 1);
+        if (e) e.components.Position.x += action.dx;
+      },
+      world,
+    });
+
+    // Send two actions
+    pm.sendAction({ type: "move", dx: 5 });
+    const tf1 = conn._sent[0].targetFrame;
+    conn.state = { frame: tf1, timeMs: 500, entities: world.serialize().entities };
+    pm.sendAction({ type: "move", dx: 3 });
+
+    // Server acknowledges first action at frame tf1 with its own position
+    conn._emitState({
+      frame: tf1,
+      timeMs: 500,
+      entities: [{ id: 1, components: { Position: { x: 7 } } }],
+    });
+
+    // World should be restored to server state, then second action re-applied
+    expect(pm.pendingCount).toBe(1);
+    expect(world._entities[0].components.Position.x).toBe(10); // 7 + 3
+
+    pm.dispose();
+  });
+
+  it("predictedState equals server state when no pending actions", () => {
+    const conn = createMockConnection(30);
+    const world = createMockWorld([
+      { id: 1, components: { Position: { x: 0, y: 0 } } },
+    ]);
+    conn.state = { frame: 10, timeMs: 333, entities: world.serialize().entities };
+
+    const pm = new PredictionManager({
+      connection: conn,
+      predict: (w, action) => {
+        const e = w._entities.find(e => e.id === 1);
+        if (e) e.components.Position.x += action.dx;
+      },
+      world,
+    });
+
+    pm.sendAction({ type: "move", dx: 5 });
+    const tf = conn._sent[0].targetFrame;
+
+    // Server acknowledges
+    conn._emitState({
+      frame: tf,
+      timeMs: 500,
+      entities: [{ id: 1, components: { Position: { x: 5, y: 0 } } }],
+    });
+
+    expect(pm.pendingCount).toBe(0);
+    expect(pm.predictedState.entities[0].components.Position.x).toBe(5);
+
+    pm.dispose();
+  });
+
+  it("fires onMisprediction in ECS mode", () => {
+    const conn = createMockConnection(30);
+    const world = createMockWorld([
+      { id: 1, components: { Position: { x: 0, y: 0 } } },
+    ]);
+    conn.state = { frame: 10, timeMs: 333, entities: world.serialize().entities };
+
+    const mispredictions = [];
+    const pm = new PredictionManager({
+      connection: conn,
+      predict: (w, action) => {
+        const e = w._entities.find(e => e.id === 1);
+        if (e) e.components.Position.x += action.dx;
+      },
+      onMisprediction: (server, prev) => mispredictions.push({ server, prev }),
+      world,
+    });
+
+    pm.sendAction({ type: "move", dx: 5 });
+
+    conn._emitState({
+      frame: 20,
+      timeMs: 666,
+      entities: [{ id: 1, components: { Position: { x: 3, y: 0 } } }],
+    });
+
+    expect(mispredictions).toHaveLength(1);
+    // previousPredicted should have the old world state (x=5)
+    expect(mispredictions[0].prev.entities[0].components.Position.x).toBe(5);
+
+    pm.dispose();
+  });
+
+  it("calls world.applySnapshot on each reconciliation", () => {
+    const conn = createMockConnection(30);
+    const world = createMockWorld([
+      { id: 1, components: { Position: { x: 0, y: 0 } } },
+    ]);
+    conn.state = { frame: 10, timeMs: 333, entities: world.serialize().entities };
+
+    const pm = new PredictionManager({
+      connection: conn,
+      predict: () => {},
+      world,
+    });
+
+    const before = world._applySnapshotCalls;
+
+    conn._emitState({
+      frame: 11,
+      timeMs: 366,
+      entities: [{ id: 1, components: { Position: { x: 10, y: 10 } } }],
+    });
+
+    expect(world._applySnapshotCalls).toBe(before + 1);
+
+    pm.dispose();
+  });
+});

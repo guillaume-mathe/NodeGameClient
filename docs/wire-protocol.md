@@ -126,6 +126,8 @@ After the handshake, the server sends three kinds of game messages.
 
 Sent as the first message after sync, then periodically every `snapshotInterval` frames (default: 20). Also sent at any time when the server determines a client has fallen too far behind or has no valid ack — so clients should always be prepared to receive a snapshot, not just at fixed intervals. Contains the complete authoritative state.
 
+**Plain-state snapshot:**
+
 ```json
 {
   "kind": "snapshot",
@@ -141,6 +143,24 @@ Sent as the first message after sync, then periodically every `snapshotInterval`
 }
 ```
 
+**ECS snapshot** (when server uses `GameLogicECS`):
+
+```json
+{
+  "kind": "snapshot",
+  "frame": 60,
+  "timeMs": 2000.0,
+  "state": {
+    "frame": 60,
+    "timeMs": 2000.0,
+    "entities": [
+      { "id": 7, "components": { "Position": { "x": 10, "y": 20 }, "Player": { "id": "alice" } } },
+      { "id": 3, "components": { "Position": { "x": 50, "y": 60 }, "Player": { "id": "bob" } } }
+    ]
+  }
+}
+```
+
 | Field   | Type   | Description |
 |---------|--------|-------------|
 | `kind`  | string | Always `"snapshot"` |
@@ -148,11 +168,13 @@ Sent as the first message after sync, then periodically every `snapshotInterval`
 | `timeMs`| number | Accumulated game time in ms |
 | `state` | object | Complete game state — structure is game-specific |
 
-**Client behavior:** Replace the entire local state with `msg.state`.
+**Client behavior:** Replace the entire local state with `msg.state`. When using an ECS World, call `world.applySnapshot(msg.state)`.
 
 ### `delta` — Incremental Update
 
-Sent on non-snapshot frames. Contains only what changed since `baseFrame`.
+Sent on non-snapshot frames. Contains only what changed since `baseFrame`. The format depends on whether the server uses plain-state mode or ECS mode.
+
+#### Plain-state delta
 
 ```json
 {
@@ -216,9 +238,9 @@ If a top-level key existed in the previous state but is absent in the new state,
 
 Top-level state fields should **not** use any of the following names, as they collide with the delta protocol:
 
-`kind`, `frame`, `baseFrame`, `timeMs`, `added`, `removed`, `updated`, `_removedKeys`
+`kind`, `frame`, `baseFrame`, `timeMs`, `added`, `removed`, `updated`, `_removedKeys`, `entities`
 
-**Client behavior:**
+**Client behavior (plain-state):**
 1. Verify `msg.baseFrame === localState.frame`. If it doesn't match, **skip the delta** — the next snapshot will resync.
 2. Apply the delta to produce the new state:
    - Remove players whose `id` is in `removed`
@@ -227,6 +249,41 @@ Top-level state fields should **not** use any of the following names, as they co
    - Merge any other non-protocol keys from the delta into the state (these are changed game fields)
    - Delete any keys listed in `_removedKeys` from the state
 3. Set `localState.frame = msg.frame` and `localState.timeMs = msg.timeMs`.
+
+#### ECS delta
+
+When the server uses `GameLogicECS`, deltas contain an `entities` array from `world.flushDiffs()`:
+
+```json
+{
+  "kind": "delta",
+  "frame": 61,
+  "baseFrame": 60,
+  "timeMs": 2033.3,
+  "entities": [
+    { "id": 7, "op": "add", "components": { "Position": { "x": 100, "y": 200 }, "Player": { "id": "alice" } } },
+    { "id": 3, "op": "update", "components": { "Position": { "x": 105, "y": 200 } } },
+    { "id": 3, "op": "update", "removed": ["Velocity"] },
+    { "id": 12, "op": "remove" }
+  ]
+}
+```
+
+Each entry in `entities` has:
+
+| Field        | Type     | Description |
+|--------------|----------|-------------|
+| `id`         | number   | Entity ID (generational) |
+| `op`         | string   | `"add"`, `"update"`, or `"remove"` |
+| `components` | object   | (add/update) Map of component name → component data |
+| `removed`    | string[] | (update only) Component names that were detached |
+
+**Client behavior (ECS):**
+1. Verify `msg.baseFrame === localState.frame`. If it doesn't match, skip.
+2. Apply the delta: for each entity entry, apply the operation (`add` → create entity, `update` → merge component data / remove components, `remove` → destroy entity).
+3. When using an ECS World, call `world.applyDiff(msg)` instead of manual application.
+
+The client auto-detects ECS vs plain-state format by checking for the `entities` field. When a `world` is provided to Connection, diffs are applied via `world.applyDiff()` and the state is serialized from the World.
 
 ### `game_event` — Lifecycle / Meta Events
 

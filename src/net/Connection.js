@@ -1,5 +1,6 @@
 import {
   defaultApplyDelta,
+  defaultApplyECSDelta,
   SYNC_REQUEST, SYNC_RESPONSE, SYNC_RESULT,
   SNAPSHOT, DELTA, GAME_EVENT, ACK, LOGOUT,
 } from "./protocol.js";
@@ -23,6 +24,7 @@ export class Connection {
    * @param {number}  [opts.maxReconnectAttempts=5]
    * @param {boolean} [opts.autoAck=true]
    * @param {((state: object, msg: object) => object)|null} [opts.applyDelta=null]
+   * @param {object|null} [opts.world=null] ECS World instance — enables ECS-aware reconciliation
    */
   constructor(url, opts = {}) {
     this.url = url;
@@ -31,7 +33,8 @@ export class Connection {
     this.reconnectDelayMs = opts.reconnectDelayMs ?? 1000;
     this.maxReconnectAttempts = opts.maxReconnectAttempts ?? 5;
     this.autoAck = opts.autoAck ?? true;
-    this._applyDelta = opts.applyDelta ?? defaultApplyDelta;
+    this._applyDelta = opts.applyDelta ?? null;
+    this._world = opts.world ?? null;
 
     /** @type {object|null} */
     this.state = null;
@@ -142,6 +145,9 @@ export class Connection {
         }
 
         if (msg.kind === SNAPSHOT) {
+          if (this._world) {
+            this._world.applySnapshot(msg.state);
+          }
           this.state = msg.state;
           this._fire(this._onStateChange, this.state);
           if (this.autoAck) {
@@ -153,7 +159,7 @@ export class Connection {
 
         if (msg.kind === DELTA) {
           if (this.state && msg.baseFrame === this.state.frame) {
-            this.state = this._applyDelta(this.state, msg);
+            this.state = this._resolveDelta(this.state, msg);
             this._fire(this._onStateChange, this.state);
             if (this.autoAck) {
               this._sendAckRaw(this.state.frame);
@@ -219,6 +225,11 @@ export class Connection {
     this.connected = false;
   }
 
+  /** ECS World instance, or `null` if not in ECS mode. */
+  get world() {
+    return this._world;
+  }
+
   // ---- Callback registration (returns unsubscribe function) ----
 
   onStateChange(cb) { return this._subscribe(this._onStateChange, cb); }
@@ -236,6 +247,28 @@ export class Connection {
       const idx = list.indexOf(cb);
       if (idx !== -1) list.splice(idx, 1);
     };
+  }
+
+  /**
+   * Resolve a delta message into a new state, choosing the appropriate strategy:
+   * 1. World — apply via world.applyDiff() and serialize
+   * 2. Custom applyDelta — user-provided function
+   * 3. Auto-detect — ECS (msg.entities) or plain-state format
+   * @private
+   */
+  _resolveDelta(state, msg) {
+    if (this._world) {
+      this._world.applyDiff(msg);
+      const snap = this._world.serialize();
+      return { frame: msg.frame, timeMs: msg.timeMs, entities: snap.entities };
+    }
+    if (this._applyDelta) {
+      return this._applyDelta(state, msg);
+    }
+    if (msg.entities) {
+      return defaultApplyECSDelta(state, msg);
+    }
+    return defaultApplyDelta(state, msg);
   }
 
   /** @private */

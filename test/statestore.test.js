@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { lerpEntity } from "../src/state/interpolation.js";
+import { lerpEntity, lerpComponents } from "../src/state/interpolation.js";
 import { StateStore } from "../src/state/StateStore.js";
 
 // ---------------------------------------------------------------------------
@@ -64,6 +64,68 @@ describe("lerpEntity", () => {
     expect(result.x).toBe(55);
     expect(result.label).toBe("new"); // string, not interpolated
     expect(result.z).toBe(50);        // prev.z is undefined, falls back to next
+  });
+});
+
+// ---------------------------------------------------------------------------
+// lerpComponents
+// ---------------------------------------------------------------------------
+
+describe("lerpComponents", () => {
+  it("interpolates specified component fields at alpha=0.5", () => {
+    const prev = { id: 1, components: { Position: { x: 0, y: 10 }, Player: { id: "a" } } };
+    const next = { id: 1, components: { Position: { x: 100, y: 20 }, Player: { id: "a" } } };
+
+    const result = lerpComponents(prev, next, 0.5, { Position: ["x", "y"] });
+
+    expect(result.id).toBe(1);
+    expect(result.components.Position.x).toBe(50);
+    expect(result.components.Position.y).toBe(15);
+    expect(result.components.Player.id).toBe("a"); // snapped
+  });
+
+  it("alpha=0 returns prev values for interpolated component fields", () => {
+    const prev = { id: 1, components: { Position: { x: 10, y: 20 } } };
+    const next = { id: 1, components: { Position: { x: 100, y: 200 } } };
+
+    const result = lerpComponents(prev, next, 0, { Position: ["x", "y"] });
+
+    expect(result.components.Position.x).toBe(10);
+    expect(result.components.Position.y).toBe(20);
+  });
+
+  it("snaps components not listed in componentFields", () => {
+    const prev = { id: 1, components: { Position: { x: 0, y: 0 }, Status: { alive: true } } };
+    const next = { id: 1, components: { Position: { x: 100, y: 100 }, Status: { alive: false } } };
+
+    const result = lerpComponents(prev, next, 0.5, { Position: ["x", "y"] });
+
+    expect(result.components.Position.x).toBe(50);
+    expect(result.components.Status.alive).toBe(false); // snapped to next
+  });
+
+  it("handles component missing in prev (snaps to next)", () => {
+    const prev = { id: 1, components: { Player: { id: "a" } } };
+    const next = { id: 1, components: { Player: { id: "a" }, Position: { x: 100, y: 200 } } };
+
+    const result = lerpComponents(prev, next, 0.5, { Position: ["x", "y"] });
+
+    expect(result.components.Position.x).toBe(100);
+    expect(result.components.Position.y).toBe(200);
+  });
+
+  it("interpolates multiple components independently", () => {
+    const prev = { id: 1, components: { Position: { x: 0, y: 0 }, Velocity: { vx: 10, vy: 20 } } };
+    const next = { id: 1, components: { Position: { x: 100, y: 100 }, Velocity: { vx: 30, vy: 40 } } };
+
+    const result = lerpComponents(prev, next, 0.5, {
+      Position: ["x", "y"],
+      Velocity: ["vx", "vy"],
+    });
+
+    expect(result.components.Position.x).toBe(50);
+    expect(result.components.Velocity.vx).toBe(20);
+    expect(result.components.Velocity.vy).toBe(30);
   });
 });
 
@@ -219,6 +281,55 @@ describe("StateStore — getInterpolatedState", () => {
     expect(result.prev.frame).toBe(2);
     expect(result.next.frame).toBe(2);
     expect(result.alpha).toBe(0);
+
+    store.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StateStore — ECS format states
+// ---------------------------------------------------------------------------
+
+describe("StateStore — ECS format", () => {
+  function makeECSState(frame, timeMs, entities = []) {
+    return { frame, timeMs, entities };
+  }
+
+  it("buffers ECS format states and interpolates", () => {
+    const conn = createMockConnection(30);
+    const store = new StateStore({ connection: conn });
+
+    conn._emit(makeECSState(1, 100, [
+      { id: 1, components: { Position: { x: 0, y: 0 } } },
+    ]));
+    conn._emit(makeECSState(2, 200, [
+      { id: 1, components: { Position: { x: 100, y: 100 } } },
+    ]));
+
+    const result = store.getInterpolatedState(150);
+
+    expect(result.prev.frame).toBe(1);
+    expect(result.next.frame).toBe(2);
+    expect(result.alpha).toBeCloseTo(0.5);
+    expect(result.prev.entities[0].components.Position.x).toBe(0);
+    expect(result.next.entities[0].components.Position.x).toBe(100);
+
+    store.dispose();
+  });
+
+  it("clears buffer on ECS snapshot (frame gap)", () => {
+    const conn = createMockConnection(30);
+    const store = new StateStore({ connection: conn });
+
+    conn._emit(makeECSState(1, 100, [{ id: 1, components: {} }]));
+    conn._emit(makeECSState(2, 133, [{ id: 1, components: {} }]));
+    conn._emit(makeECSState(3, 166, [{ id: 1, components: {} }]));
+
+    expect(store.count).toBe(3);
+
+    // Snapshot jump
+    conn._emit(makeECSState(10, 400, [{ id: 1, components: {} }]));
+    expect(store.count).toBe(1);
 
     store.dispose();
   });

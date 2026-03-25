@@ -605,4 +605,192 @@ describe("Connection", () => {
       client.disconnect();
     });
   });
+
+  // ------ ECS mode ------
+
+  describe("ECS mode (auto-detect)", () => {
+    beforeEach(() => {
+      mock.cleanup();
+      mock = installMockWebSocket({ ecs: true });
+    });
+
+    it("applies ECS snapshot with entities array", async () => {
+      const client = new Connection("ws://mock", { token: "t1" });
+      await client.connect();
+
+      expect(client.state).toBeTruthy();
+      expect(Array.isArray(client.state.entities)).toBe(true);
+      expect(client.state.entities[0].components.Player.id).toBe("mock-player-1");
+
+      client.disconnect();
+    });
+
+    it("applies ECS delta (add/update/remove ops)", async () => {
+      const client = new Connection("ws://mock", { token: "t1" });
+      await client.connect();
+
+      const ws = mock.lastInstance();
+
+      // Delta: add a new entity, update existing
+      ws.serverSend({
+        kind: "delta",
+        frame: 2,
+        baseFrame: 1,
+        timeMs: 33.3,
+        entities: [
+          { id: 2, op: "add", components: { Position: { x: 50, y: 60 }, Player: { id: "player-2" } } },
+          { id: 1, op: "update", components: { Position: { x: 10, y: 20 } } },
+        ],
+      });
+
+      await waitFor(() => client.state.frame === 2);
+
+      expect(client.state.entities).toHaveLength(2);
+
+      const e1 = client.state.entities.find(e => e.id === 1);
+      expect(e1.components.Position.x).toBe(10);
+      expect(e1.components.Position.y).toBe(20);
+
+      const e2 = client.state.entities.find(e => e.id === 2);
+      expect(e2.components.Player.id).toBe("player-2");
+
+      // Delta: remove entity 2
+      ws.serverSend({
+        kind: "delta",
+        frame: 3,
+        baseFrame: 2,
+        timeMs: 66.6,
+        entities: [
+          { id: 2, op: "remove" },
+        ],
+      });
+
+      await waitFor(() => client.state.frame === 3);
+      expect(client.state.entities).toHaveLength(1);
+      expect(client.state.entities[0].id).toBe(1);
+
+      client.disconnect();
+    });
+
+    it("handles ECS delta with component removal", async () => {
+      const client = new Connection("ws://mock", { token: "t1" });
+      await client.connect();
+
+      const ws = mock.lastInstance();
+
+      // Add a component, then remove it
+      ws.serverSend({
+        kind: "delta",
+        frame: 2,
+        baseFrame: 1,
+        timeMs: 33.3,
+        entities: [
+          { id: 1, op: "update", components: { Velocity: { vx: 1, vy: 0 } } },
+        ],
+      });
+
+      await waitFor(() => client.state.frame === 2);
+      expect(client.state.entities[0].components.Velocity).toBeTruthy();
+
+      ws.serverSend({
+        kind: "delta",
+        frame: 3,
+        baseFrame: 2,
+        timeMs: 66.6,
+        entities: [
+          { id: 1, op: "update", removed: ["Velocity"] },
+        ],
+      });
+
+      await waitFor(() => client.state.frame === 3);
+      expect(client.state.entities[0].components.Velocity).toBeUndefined();
+
+      client.disconnect();
+    });
+  });
+
+  describe("ECS mode (world option)", () => {
+    function createMockWorld() {
+      let entities = [];
+      return {
+        _entities: entities,
+        applySnapshot(data) {
+          entities = data.entities
+            ? data.entities.map(e => ({ id: e.id, components: { ...e.components } }))
+            : [];
+          this._entities = entities;
+        },
+        applyDiff(diff) {
+          for (const entry of diff.entities) {
+            switch (entry.op) {
+              case "add":
+                entities.push({ id: entry.id, components: { ...entry.components } });
+                break;
+              case "update": {
+                const existing = entities.find(e => e.id === entry.id);
+                if (existing && entry.components) {
+                  for (const [name, data] of Object.entries(entry.components)) {
+                    existing.components[name] = { ...existing.components[name], ...data };
+                  }
+                }
+                if (existing && entry.removed) {
+                  for (const name of entry.removed) delete existing.components[name];
+                }
+                break;
+              }
+              case "remove":
+                this._entities = entities = entities.filter(e => e.id !== entry.id);
+                break;
+            }
+          }
+        },
+        serialize() {
+          return { entities: entities.map(e => ({ id: e.id, components: { ...e.components } })) };
+        },
+      };
+    }
+
+    beforeEach(() => {
+      mock.cleanup();
+      mock = installMockWebSocket({ ecs: true });
+    });
+
+    it("applies snapshot to world", async () => {
+      const world = createMockWorld();
+      const client = new Connection("ws://mock", { token: "t1", world });
+      await client.connect();
+
+      expect(client.world).toBe(world);
+      expect(world._entities).toHaveLength(1);
+      expect(world._entities[0].components.Player.id).toBe("mock-player-1");
+
+      client.disconnect();
+    });
+
+    it("applies delta via world.applyDiff()", async () => {
+      const world = createMockWorld();
+      const client = new Connection("ws://mock", { token: "t1", world });
+      await client.connect();
+
+      const ws = mock.lastInstance();
+      ws.serverSend({
+        kind: "delta",
+        frame: 2,
+        baseFrame: 1,
+        timeMs: 33.3,
+        entities: [
+          { id: 2, op: "add", components: { Position: { x: 50, y: 60 } } },
+          { id: 1, op: "update", components: { Position: { x: 10, y: 20 } } },
+        ],
+      });
+
+      await waitFor(() => client.state.frame === 2);
+
+      // Both world and state should reflect the changes
+      expect(world._entities).toHaveLength(2);
+      expect(client.state.entities).toHaveLength(2);
+
+      client.disconnect();
+    });
+  });
 });

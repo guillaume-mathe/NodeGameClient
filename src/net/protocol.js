@@ -2,6 +2,7 @@
 export const DELTA_PROTOCOL_KEYS = new Set([
   "kind", "frame", "baseFrame", "timeMs",
   "added", "removed", "updated", "_removedKeys",
+  "entities",
 ]);
 
 /** Message kind constants. */
@@ -52,4 +53,49 @@ export function defaultApplyDelta(state, msg) {
   }
 
   return result;
+}
+
+/**
+ * ECS delta applier — handles the structured entity diff format:
+ * each entry in `msg.entities` has `{ id, op, components?, removed? }`.
+ *
+ * @param {object} state  Current client state (`{ frame, timeMs, entities }`)
+ * @param {object} msg    Delta message from server
+ * @returns {object}      New state with delta applied
+ */
+export function defaultApplyECSDelta(state, msg) {
+  let entities = state.entities ? state.entities.slice() : [];
+
+  for (const entry of msg.entities) {
+    switch (entry.op) {
+      case "add":
+        entities.push({ id: entry.id, components: { ...entry.components } });
+        break;
+
+      case "update": {
+        const idx = entities.findIndex(e => e.id === entry.id);
+        if (idx !== -1) {
+          const components = { ...entities[idx].components };
+          if (entry.components) {
+            for (const name of Object.keys(entry.components)) {
+              components[name] = { ...components[name], ...entry.components[name] };
+            }
+          }
+          if (entry.removed) {
+            for (const name of entry.removed) {
+              delete components[name];
+            }
+          }
+          entities[idx] = { id: entry.id, components };
+        }
+        break;
+      }
+
+      case "remove":
+        entities = entities.filter(e => e.id !== entry.id);
+        break;
+    }
+  }
+
+  return { frame: msg.frame, timeMs: msg.timeMs, entities };
 }

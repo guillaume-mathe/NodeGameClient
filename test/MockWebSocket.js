@@ -27,6 +27,7 @@ export class MockWebSocket {
    * @param {object} [opts.initialState] - custom initial snapshot state
    * @param {boolean} [opts.autoSync=true] - automatically run sync handshake
    * @param {boolean} [opts.resumed=false] - whether to report a resumed session
+   * @param {boolean} [opts.ecs=false] - use ECS entity format for default state
    */
   constructor(url, opts = {}) {
     this.url = url;
@@ -47,6 +48,7 @@ export class MockWebSocket {
     this._initialState = opts.initialState ?? null;
     this._autoSync = opts.autoSync ?? true;
     this._resumed = opts.resumed ?? false;
+    this._ecs = opts.ecs ?? false;
     this._closed = false;
 
     // Schedule open + sync handshake on next microtask
@@ -137,11 +139,19 @@ export class MockWebSocket {
     });
 
     // 4. Send initial snapshot
-    const state = this._initialState ?? {
-      frame: this._serverFrame,
-      timeMs: 0,
-      players: [{ id: this._playerId, x: 0, y: 0 }],
-    };
+    const state = this._initialState ?? (this._ecs
+      ? {
+          frame: this._serverFrame,
+          timeMs: 0,
+          entities: [
+            { id: 1, components: { Position: { x: 0, y: 0 }, Player: { id: this._playerId } } },
+          ],
+        }
+      : {
+          frame: this._serverFrame,
+          timeMs: 0,
+          players: [{ id: this._playerId, x: 0, y: 0 }],
+        });
     this.serverSend({ kind: "snapshot", frame: state.frame, timeMs: state.timeMs, state });
   }
 }
